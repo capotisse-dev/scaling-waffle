@@ -7,9 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from app.audit import log_audit
 from app.config import BACKUPS_DIR, DATA_DIR, DB_PATH
-from app.services import Actor, ensure_actor, require_permission
+from app.services.common import Actor, audit, require_permission
 
 PERMISSION_KEY = "manage_backups"
 
@@ -19,27 +18,40 @@ def _timestamp() -> str:
 
 
 def create_backup_now(actor_user: Actor | dict | None = None) -> Path:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "create_backup_now", "Admin")
+    actor = require_permission(actor_user, PERMISSION_KEY, "create_backup_now", "Admin")
     backup_dir = Path(BACKUPS_DIR)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     stamp = _timestamp()
     db_target = backup_dir / f"backup_{stamp}.db"
-    shutil.copy2(DB_PATH, db_target)
+    try:
+        shutil.copy2(DB_PATH, db_target)
 
-    uploads_dir = Path(DATA_DIR) / "storage"
-    if uploads_dir.exists():
-        zip_path = backup_dir / f"uploads_{stamp}.zip"
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _, files in os.walk(uploads_dir):
-                for filename in files:
-                    full_path = Path(root) / filename
-                    zf.write(full_path, full_path.relative_to(uploads_dir))
+        uploads_dir = Path(DATA_DIR) / "storage"
+        if uploads_dir.exists():
+            zip_path = backup_dir / f"uploads_{stamp}.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, _, files in os.walk(uploads_dir):
+                    for filename in files:
+                        full_path = Path(root) / filename
+                        zf.write(full_path, full_path.relative_to(uploads_dir))
 
-    _prune_old_backups(backup_dir, keep=14)
-    log_audit(actor.username, f"Created backup {db_target.name}")
-    return db_target
+        _prune_old_backups(backup_dir, keep=14)
+        audit(
+            "backup.create",
+            actor.username,
+            {"filename": db_target.name},
+            success=True,
+        )
+        return db_target
+    except Exception as exc:
+        audit(
+            "backup.create",
+            actor.username,
+            {"filename": db_target.name, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def _prune_old_backups(backup_dir: Path, keep: int) -> None:
@@ -49,11 +61,24 @@ def _prune_old_backups(backup_dir: Path, keep: int) -> None:
 
 
 def restore_backup(backup_file: str, actor_user: Actor | dict | None = None) -> Optional[Path]:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "restore_backup", "Admin")
+    actor = require_permission(actor_user, PERMISSION_KEY, "restore_backup", "Admin")
     backup_path = Path(backup_file)
     if not backup_path.exists():
         return None
-    shutil.copy2(backup_path, DB_PATH)
-    log_audit(actor.username, f"Restored backup from {backup_path.name}")
-    return backup_path
+    try:
+        shutil.copy2(backup_path, DB_PATH)
+        audit(
+            "backup.restore",
+            actor.username,
+            {"filename": backup_path.name},
+            success=True,
+        )
+        return backup_path
+    except Exception as exc:
+        audit(
+            "backup.restore",
+            actor.username,
+            {"filename": backup_path.name, "error": str(exc)},
+            success=False,
+        )
+        raise

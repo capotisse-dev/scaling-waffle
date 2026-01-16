@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from .storage import list_month_files
+from .ui_diagnostics import show_diagnostics
 
 LIGHT = {"bg": "#f0f0f0", "fg": "black", "header_bg": "#cccccc"}
 DARK  = {"bg": "#2e2e2e", "fg": "white", "header_bg": "#1a1a1a"}
@@ -18,6 +19,10 @@ class HeaderFrame(tk.Frame):
         right.pack(side="right", padx=10)
 
         mode_text = "Light Mode" if controller.is_dark else "Dark Mode"
+        tk.Button(right, text="Diagnostics", command=lambda: show_diagnostics(self, controller), width=12).pack(
+            side="left",
+            padx=6,
+        )
         tk.Button(right, text=mode_text, command=controller.toggle_theme, width=12).pack(side="left", padx=6)
         tk.Button(right, text="Logout", command=controller.logout,
                   bg="#d9534f", fg="white", font=("Arial", 10, "bold")).pack(side="left", padx=6)

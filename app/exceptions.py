@@ -1,4 +1,4 @@
-class PermissionDenied(Exception):
+class PermissionDenied(PermissionError):
     """Raised when a user lacks permission for an action."""
 
 

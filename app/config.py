@@ -1,6 +1,7 @@
 # app/config.py
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
 
@@ -15,6 +16,17 @@ DATA_DIR = str(PROJECT_ROOT / "data")
 LOGS_DIR = str(PROJECT_ROOT / "logs")
 LOG_DIR = LOGS_DIR  # compat alias
 BACKUPS_DIR = str(PROJECT_ROOT / "backups")
+
+
+@dataclass(frozen=True)
+class AppInfo:
+    version: str
+    data_dir: str
+    db_path: str
+    logs_dir: str
+
+
+APP_VERSION = "0.1.0"
 
 # Logs
 AUDIT_LOG_FILE = str(Path(LOGS_DIR) / "audit.log")
@@ -41,6 +53,13 @@ LPA_CHECKLIST_FILE = str(Path(DATA_DIR) / "lpa_checklist.json")
 GAGES_FILE = str(Path(DATA_DIR) / "gages.json")
 GAGE_VERIFICATION_Q_FILE = str(Path(DATA_DIR) / "gage_verification_questions.json")
 DB_PATH = str(Path(DATA_DIR) / "toollife.db")
+
+APP_INFO = AppInfo(
+    version=APP_VERSION,
+    data_dir=DATA_DIR,
+    db_path=DB_PATH,
+    logs_dir=LOGS_DIR,
+)
 
 # Action/NCR system
 NCRS_FILE = str(Path(DATA_DIR) / "ncrs.json")
@@ -150,10 +169,6 @@ DEFAULT_LINE_TOOL_MAP = {
         "21", "23", "25", "26", "27", "40", "60",
     ] + [str(i) for i in range(201, 216)],
 }
-DEFAULT_TOOL_CONFIG = {}
-DEFAULT_LINES = ["U725", "JL"]
-DEFAULT_DOWNTIME_CODES = []
-
 DEFAULT_DEFECT_CODES = []
 DEFAULT_ANDON_REASONS = []
 

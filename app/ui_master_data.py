@@ -3,39 +3,39 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import shutil
-
 from .storage import safe_float, safe_int
-from .db import (
-    list_tools_simple,
-    upsert_tool_inventory,
-    deactivate_tool,
-    list_tools_for_line,
-    list_lines,
-    get_tool_lines,
-    set_tool_lines,
-    list_tool_inserts,
-    replace_tool_inserts,
-    get_tool_parts,
-    set_tool_parts,
-    list_parts_with_lines,
-    upsert_part,
-    deactivate_part,
-    set_scrap_cost,
-    get_scrap_costs_simple,
-    list_downtime_codes,
-    upsert_downtime_code,
-    deactivate_downtime_code,
-    list_production_goals,
-    upsert_production_goal,
-    list_cells_for_line,
-    list_machines_for_line,
-    list_parts_for_line,
-    delete_machine_from_line,
+from .services.master_data_service import (
+    add_line_service,
+    add_machine_to_line_service,
+    deactivate_downtime_code_service,
+    deactivate_part_service,
+    deactivate_tool_service,
+    delete_machine_from_line_service,
+    export_database,
+    get_scrap_costs_simple_service,
+    get_tool_lines_service,
+    get_tool_parts_service,
+    import_database,
+    list_cells_for_line_service,
+    list_downtime_codes_service,
+    list_lines_service,
+    list_machines_for_line_service,
+    list_parts_for_line_service,
+    list_parts_with_lines_service,
+    list_production_goals_service,
+    list_tool_inserts_service,
+    list_tools_for_line_service,
+    list_tools_simple_service,
+    replace_tool_inserts_service,
+    set_scrap_cost_service,
+    set_tool_lines_service,
+    set_tool_parts_service,
+    upsert_downtime_code_service,
+    upsert_part_service,
+    upsert_production_goal_service,
+    upsert_tool_inventory_service,
 )
 from .ui_machine_history import MachineHistoryUI
-from .audit import log_audit
-from .config import DB_PATH
 
 
 
@@ -100,6 +100,13 @@ class MasterDataUI(tk.Frame):
         self.db_import_btn.configure(state="disabled")
         self.db_export_btn.configure(state="disabled")
 
+    def _run_service_action(self, func):
+        try:
+            return func()
+        except PermissionError as exc:
+            messagebox.showerror("Action Denied", str(exc))
+            return None
+
     # -------------------- TOOL PRICING --------------------
     def _build_tool_pricing(self, parent):
         top = tk.Frame(parent, bg=self.controller.colors["bg"], padx=10, pady=10)
@@ -122,7 +129,7 @@ class MasterDataUI(tk.Frame):
 
         tk.Label(filter_frame, text="Line Filter:", bg=self.controller.colors["bg"], fg=self.controller.colors["fg"]).pack(side="left")
         self.tool_line_filter = tk.StringVar(value="All")
-        line_options = ["All"] + (list_lines() or [])
+        line_options = ["All"] + (list_lines_service() or [])
         self.tool_line_combo = ttk.Combobox(
             filter_frame,
             values=line_options,
@@ -165,9 +172,9 @@ class MasterDataUI(tk.Frame):
             self.tool_tree.delete(i)
 
         line_filter = self.tool_line_filter.get() if hasattr(self, "tool_line_filter") else "All"
-        tool_rows = list_tools_simple()
+        tool_rows = list_tools_simple_service()
         if line_filter and line_filter != "All":
-            allowed = set(list_tools_for_line(line_filter, include_unassigned=False))
+            allowed = set(list_tools_for_line_service(line_filter, include_unassigned=False))
             tool_rows = [t for t in tool_rows if t.get("tool_num") in allowed]
 
         for tool in tool_rows:
@@ -177,8 +184,8 @@ class MasterDataUI(tk.Frame):
                 tool.get("name", ""),
                 tool.get("unit_cost", 0.0),
                 tool.get("stock_qty", 0),
-                ", ".join(get_tool_lines(tool_num)),
-                ", ".join(get_tool_parts(tool_num)),
+                ", ".join(get_tool_lines_service(tool_num)),
+                ", ".join(get_tool_parts_service(tool_num)),
             ))
 
     def _selected_tool(self):
@@ -197,7 +204,7 @@ class MasterDataUI(tk.Frame):
         is_new = not tool_num
         tool_data = {}
         if tool_num:
-            for t in list_tools_simple():
+            for t in list_tools_simple_service():
                 if t.get("tool_num") == tool_num:
                     tool_data = t
                     break
@@ -226,8 +233,8 @@ class MasterDataUI(tk.Frame):
 
         line_frame = tk.LabelFrame(form, text="Lines", padx=8, pady=8)
         line_frame.grid(row=2, column=0, columnspan=4, sticky="we", pady=10)
-        line_opts = list_lines() or ["U725", "JL"]
-        selected_lines = set(get_tool_lines(tool_num)) if tool_num else set()
+        line_opts = list_lines_service() or ["U725", "JL"]
+        selected_lines = set(get_tool_lines_service(tool_num)) if tool_num else set()
         line_vars = {}
         for idx, line in enumerate(line_opts):
             var = tk.BooleanVar(value=line in selected_lines)
@@ -236,8 +243,8 @@ class MasterDataUI(tk.Frame):
 
         parts_frame = tk.LabelFrame(form, text="Parts", padx=8, pady=8)
         parts_frame.grid(row=3, column=0, columnspan=4, sticky="we", pady=10)
-        part_options = [p.get("part_number", "") for p in list_parts_with_lines()]
-        selected_parts = set(get_tool_parts(tool_num)) if tool_num else set()
+        part_options = [p.get("part_number", "") for p in list_parts_with_lines_service()]
+        selected_parts = set(get_tool_parts_service(tool_num)) if tool_num else set()
         part_vars = {}
         for idx, pn in enumerate(part_options):
             var = tk.BooleanVar(value=pn in selected_parts)
@@ -251,7 +258,7 @@ class MasterDataUI(tk.Frame):
         inserts_nb.pack(fill="both", expand=True)
 
         insert_tabs = []
-        for ins in list_tool_inserts(tool_num):
+        for ins in list_tool_inserts_service(tool_num):
             insert_tabs.append(self._populate_insert_tab(inserts_nb, ins))
         if not insert_tabs:
             insert_tabs.append(self._populate_insert_tab(inserts_nb, {}))
@@ -275,19 +282,34 @@ class MasterDataUI(tk.Frame):
             if not tnum:
                 messagebox.showerror("Error", "Tool # is required.")
                 return
-            upsert_tool_inventory(
-                tool_num=tnum,
-                name=tool_name_var.get().strip(),
-                unit_cost=safe_float(tool_cost_var.get(), 0.0),
-                stock_qty=safe_int(tool_stock_var.get(), 0),
-                inserts_per_tool=1,
-            )
-            set_tool_lines(tnum, [ln for ln, var in line_vars.items() if var.get()])
-            set_tool_parts(tnum, [pn for pn, var in part_vars.items() if var.get()])
-            replace_tool_inserts(tnum, self._collect_insert_data(insert_tabs))
-            log_audit(self.controller.user, f"Updated tool {tnum} configuration")
-            self.refresh_tools()
-            top.destroy()
+            def _save():
+                upsert_tool_inventory_service(
+                    tool_num=tnum,
+                    name=tool_name_var.get().strip(),
+                    unit_cost=safe_float(tool_cost_var.get(), 0.0),
+                    stock_qty=safe_int(tool_stock_var.get(), 0),
+                    inserts_per_tool=1,
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                set_tool_lines_service(
+                    tnum,
+                    [ln for ln, var in line_vars.items() if var.get()],
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                set_tool_parts_service(
+                    tnum,
+                    [pn for pn, var in part_vars.items() if var.get()],
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                replace_tool_inserts_service(
+                    tnum,
+                    self._collect_insert_data(insert_tabs),
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                self.refresh_tools()
+                top.destroy()
+
+            self._run_service_action(_save)
 
         tk.Button(form, text="Save Tool", command=save, bg="#28a745", fg="white").grid(row=6, column=3, pady=8, sticky="e")
         recalc_cost()
@@ -301,9 +323,15 @@ class MasterDataUI(tk.Frame):
             return
         if not messagebox.askyesno("Confirm", f"Delete tool '{tool}'?"):
             return
-        deactivate_tool(tool, deleted_by=self.controller.user)
-        log_audit(self.controller.user, f"Deactivated tool {tool}")
-        self.refresh_tools()
+        def _deactivate():
+            deactivate_tool_service(
+                tool,
+                deleted_by=self.controller.user,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.refresh_tools()
+
+        self._run_service_action(_deactivate)
 
     def save_tools(self):
         messagebox.showinfo("Saved", "Tool pricing saved.")
@@ -397,7 +425,7 @@ class MasterDataUI(tk.Frame):
         for i in self.part_tree.get_children():
             self.part_tree.delete(i)
 
-        for p in list_parts_with_lines():
+        for p in list_parts_with_lines_service():
             self.part_tree.insert("", "end", values=(
                 p.get("part_number", ""),
                 p.get("name", ""),
@@ -418,7 +446,7 @@ class MasterDataUI(tk.Frame):
         top.geometry("520x360")
 
         existing = {}
-        for p in list_parts_with_lines():
+        for p in list_parts_with_lines_service():
             if p.get("part_number") == part_number:
                 existing = p
                 break
@@ -439,7 +467,7 @@ class MasterDataUI(tk.Frame):
 
         line_frame = tk.LabelFrame(form, text="Lines", padx=8, pady=8)
         line_frame.grid(row=2, column=0, columnspan=2, sticky="we", pady=10)
-        line_opts = list_lines() or ["U725", "JL"]
+        line_opts = list_lines_service() or ["U725", "JL"]
         selected = set(existing.get("lines", []) or [])
         line_vars = {}
         for idx, line in enumerate(line_opts):
@@ -454,10 +482,17 @@ class MasterDataUI(tk.Frame):
                 return
             name = name_var.get().strip()
             lines = [ln for ln, var in line_vars.items() if var.get()]
-            upsert_part(pn, name=name, lines=lines)
-            log_audit(self.controller.user, f"Updated part {pn} lines/pricing")
-            self.refresh_parts()
-            top.destroy()
+            def _save():
+                upsert_part_service(
+                    pn,
+                    name=name,
+                    lines=lines,
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                self.refresh_parts()
+                top.destroy()
+
+            self._run_service_action(_save)
 
         tk.Button(form, text="Save Part", command=save, bg="#28a745", fg="white").grid(row=3, column=1, sticky="e", pady=10)
 
@@ -471,9 +506,15 @@ class MasterDataUI(tk.Frame):
         if not messagebox.askyesno("Confirm", f"Delete part '{pn}'?"):
             return
 
-        deactivate_part(pn, deleted_by=self.controller.user)
-        log_audit(self.controller.user, f"Deactivated part {pn}")
-        self.refresh_parts()
+        def _deactivate():
+            deactivate_part_service(
+                pn,
+                deleted_by=self.controller.user,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.refresh_parts()
+
+        self._run_service_action(_deactivate)
 
     # -------------------- SCRAP PRICING --------------------
     def _build_scrap(self, parent):
@@ -516,7 +557,7 @@ class MasterDataUI(tk.Frame):
         for i in self.scrap_tree.get_children():
             self.scrap_tree.delete(i)
 
-        m = get_scrap_costs_simple()
+        m = get_scrap_costs_simple_service()
         for pn in sorted(m.keys()):
             self.scrap_tree.insert("", "end", values=(pn, m[pn]))
     def _selected_scrap_part(self):
@@ -532,7 +573,7 @@ class MasterDataUI(tk.Frame):
         top.title("Scrap Cost Editor")
         top.geometry("420x220")
 
-        existing_costs = get_scrap_costs_simple()
+        existing_costs = get_scrap_costs_simple_service()
         cost_val = existing_costs.get(part_number, "")
 
         form = tk.Frame(top, padx=12, pady=12)
@@ -555,10 +596,16 @@ class MasterDataUI(tk.Frame):
                 messagebox.showerror("Error", "Part # is required.")
                 return
             cost = safe_float(cost_var.get(), 0.0)
-            set_scrap_cost(pn, cost)
-            log_audit(self.controller.user, f"Set scrap cost for {pn} to {cost}")
-            self.refresh_scrap()
-            top.destroy()
+            def _save():
+                set_scrap_cost_service(
+                    pn,
+                    cost,
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                self.refresh_scrap()
+                top.destroy()
+
+            self._run_service_action(_save)
 
         tk.Button(form, text="Save Scrap Cost", command=save, bg="#28a745", fg="white").grid(row=2, column=1, sticky="e", pady=12)
 
@@ -571,9 +618,15 @@ class MasterDataUI(tk.Frame):
             return
         if not messagebox.askyesno("Confirm", f"Delete scrap price for '{pn}'?"):
             return
-        set_scrap_cost(pn, 0.0)
-        log_audit(self.controller.user, f"Cleared scrap cost for {pn}")
-        self.refresh_scrap()
+        def _clear():
+            set_scrap_cost_service(
+                pn,
+                0.0,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.refresh_scrap()
+
+        self._run_service_action(_clear)
 
     # -------------------- DOWNTIME CODES --------------------
     def _build_downtime(self, parent):
@@ -612,7 +665,7 @@ class MasterDataUI(tk.Frame):
         for i in self.downtime_tree.get_children():
             self.downtime_tree.delete(i)
 
-        for row in list_downtime_codes(active_only=False):
+        for row in list_downtime_codes_service(active_only=False):
             self.downtime_tree.insert("", "end", values=(
                 row.get("code", ""),
                 row.get("description", ""),
@@ -632,7 +685,7 @@ class MasterDataUI(tk.Frame):
         top.title("Downtime Code Editor")
         top.geometry("420x220")
 
-        existing = {row["code"]: row for row in list_downtime_codes(active_only=False)}
+        existing = {row["code"]: row for row in list_downtime_codes_service(active_only=False)}
         info = existing.get(code, {})
 
         form = tk.Frame(top, padx=12, pady=12)
@@ -654,10 +707,16 @@ class MasterDataUI(tk.Frame):
             if not code_val:
                 messagebox.showerror("Error", "Code is required.")
                 return
-            upsert_downtime_code(code_val, desc_var.get().strip())
-            log_audit(self.controller.user, f"Updated downtime code {code_val}")
-            self.refresh_downtime()
-            top.destroy()
+            def _save():
+                upsert_downtime_code_service(
+                    code_val,
+                    desc_var.get().strip(),
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                self.refresh_downtime()
+                top.destroy()
+
+            self._run_service_action(_save)
 
         tk.Button(form, text="Save Code", command=save, bg="#28a745", fg="white").grid(row=2, column=1, sticky="e", pady=12)
 
@@ -667,9 +726,15 @@ class MasterDataUI(tk.Frame):
             return
         if not messagebox.askyesno("Confirm", f"Deactivate downtime code '{code}'?"):
             return
-        deactivate_downtime_code(code, deleted_by=self.controller.user)
-        log_audit(self.controller.user, f"Deactivated downtime code {code}")
-        self.refresh_downtime()
+        def _deactivate():
+            deactivate_downtime_code_service(
+                code,
+                deleted_by=self.controller.user,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.refresh_downtime()
+
+        self._run_service_action(_deactivate)
 
     # -------------------- DATABASE IMPORT/EXPORT --------------------
     def _export_database(self):
@@ -682,12 +747,17 @@ class MasterDataUI(tk.Frame):
         )
         if not path:
             return
-        try:
-            shutil.copyfile(DB_PATH, path)
-            log_audit(self.controller.user, f"Exported database to {path}")
-            messagebox.showinfo("Exported", f"Database exported to:\n{path}")
-        except Exception as exc:
-            messagebox.showerror("Export Failed", f"Unable to export database.\n{exc}")
+        def _export():
+            try:
+                export_database(
+                    path,
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                messagebox.showinfo("Exported", f"Database exported to:\n{path}")
+            except Exception as exc:
+                messagebox.showerror("Export Failed", f"Unable to export database.\n{exc}")
+
+        self._run_service_action(_export)
 
     def _import_database(self):
         if self.readonly:
@@ -703,12 +773,17 @@ class MasterDataUI(tk.Frame):
             "Importing a database will overwrite current data. Continue?",
         ):
             return
-        try:
-            shutil.copyfile(path, DB_PATH)
-            log_audit(self.controller.user, f"Imported database from {path}")
-            messagebox.showinfo("Imported", "Database imported. Please restart the app.")
-        except Exception as exc:
-            messagebox.showerror("Import Failed", f"Unable to import database.\n{exc}")
+        def _import():
+            try:
+                import_database(
+                    path,
+                    actor_user={"username": self.controller.user, "role": self.controller.role},
+                )
+                messagebox.showinfo("Imported", "Database imported. Please restart the app.")
+            except Exception as exc:
+                messagebox.showerror("Import Failed", f"Unable to import database.\n{exc}")
+
+        self._run_service_action(_import)
 
     # -------------------- PRODUCTION GOALS --------------------
     def _build_production_goals(self, parent):
@@ -732,7 +807,7 @@ class MasterDataUI(tk.Frame):
         self.goal_line_var = tk.StringVar(value="")
         self.goal_line_combo = ttk.Combobox(
             form,
-            values=list_lines(),
+            values=list_lines_service(),
             textvariable=self.goal_line_var,
             state="readonly",
             width=18,
@@ -797,13 +872,13 @@ class MasterDataUI(tk.Frame):
 
     def _refresh_goal_dependent_fields(self, event=None):
         line = self.goal_line_var.get().strip()
-        cells = list_cells_for_line(line)
+        cells = list_cells_for_line_service(line)
         self.goal_cell_combo.configure(values=cells)
         if cells:
             self.goal_cell_var.set(cells[0])
         else:
             self.goal_cell_var.set("")
-        parts = list_parts_for_line(line)
+        parts = list_parts_for_line_service(line)
         self.goal_part_combo.configure(values=parts)
         if parts:
             self.goal_part_var.set(parts[0])
@@ -813,7 +888,7 @@ class MasterDataUI(tk.Frame):
 
     def _refresh_goal_machine_fields(self, event=None):
         line = self.goal_line_var.get().strip()
-        machines = list_machines_for_line(line)
+        machines = list_machines_for_line_service(line)
         self.goal_machine_combo.configure(values=machines)
         if machines:
             self.goal_machine_var.set(machines[0])
@@ -842,7 +917,7 @@ class MasterDataUI(tk.Frame):
         self.machine_line_var = tk.StringVar(value="")
         self.machine_line_combo = ttk.Combobox(
             form,
-            values=list_lines(),
+            values=list_lines_service(),
             textvariable=self.machine_line_var,
             state="readonly",
             width=18,
@@ -889,10 +964,15 @@ class MasterDataUI(tk.Frame):
         if not line:
             messagebox.showerror("Error", "Line name is required.")
             return
-        add_line(line)
-        log_audit(self.controller.user, f"Added line {line}")
-        self.add_line_var.set("")
-        self.refresh_line_machines()
+        def _add():
+            add_line_service(
+                line,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.add_line_var.set("")
+            self.refresh_line_machines()
+
+        self._run_service_action(_add)
 
     def _add_machine(self):
         if self.readonly:
@@ -905,10 +985,16 @@ class MasterDataUI(tk.Frame):
         if not machine:
             messagebox.showerror("Error", "Machine name is required.")
             return
-        add_machine_to_line(line, machine)
-        log_audit(self.controller.user, f"Added machine {machine} to line {line}")
-        self.add_machine_var.set("")
-        self.refresh_line_machines()
+        def _add():
+            add_machine_to_line_service(
+                line,
+                machine,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.add_machine_var.set("")
+            self.refresh_line_machines()
+
+        self._run_service_action(_add)
 
     def _delete_selected_machine(self):
         if self.readonly:
@@ -919,9 +1005,16 @@ class MasterDataUI(tk.Frame):
         line, machine = self.machine_tree.item(sel[0], "values")
         if not messagebox.askyesno("Confirm", f"Delete machine '{machine}' from line '{line}'?"):
             return
-        delete_machine_from_line(line, machine, deleted_by=self.controller.user)
-        log_audit(self.controller.user, f"Deleted machine {machine} from line {line}")
-        self.refresh_line_machines()
+        def _delete():
+            delete_machine_from_line_service(
+                line,
+                machine,
+                deleted_by=self.controller.user,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.refresh_line_machines()
+
+        self._run_service_action(_delete)
 
     def refresh_line_machines(self):
         if not hasattr(self, "machine_tree"):
@@ -929,7 +1022,7 @@ class MasterDataUI(tk.Frame):
         for item in self.machine_tree.get_children():
             self.machine_tree.delete(item)
 
-        lines = list_lines()
+        lines = list_lines_service()
         self.machine_line_combo.configure(values=lines)
         if lines and self.machine_line_var.get() not in lines:
             self.machine_line_var.set(lines[0])
@@ -937,14 +1030,14 @@ class MasterDataUI(tk.Frame):
         line = self.machine_line_var.get().strip()
         if not line:
             return
-        for machine in list_machines_for_line(line):
+        for machine in list_machines_for_line_service(line):
             self.machine_tree.insert("", "end", values=(line, machine))
 
     def refresh_goals(self):
         if hasattr(self, "goal_tree"):
             for i in self.goal_tree.get_children():
                 self.goal_tree.delete(i)
-            for goal in list_production_goals():
+            for goal in list_production_goals_service():
                 self.goal_tree.insert(
                     "",
                     "end",
@@ -957,7 +1050,7 @@ class MasterDataUI(tk.Frame):
                     ),
                 )
         if hasattr(self, "goal_line_combo"):
-            self.goal_line_combo.configure(values=list_lines())
+            self.goal_line_combo.configure(values=list_lines_service())
             self._refresh_goal_dependent_fields()
 
     def _load_selected_goal(self, event=None):
@@ -982,9 +1075,15 @@ class MasterDataUI(tk.Frame):
         machine = self.goal_machine_var.get().strip()
         part_number = self.goal_part_var.get().strip()
         target = safe_float(self.goal_target_var.get(), 0.0)
-        upsert_production_goal(line, target, cell=cell, machine=machine, part_number=part_number)
-        log_audit(
-            self.controller.user,
-            f"Updated production goal for {line} {cell} {machine} {part_number}: {target}",
-        )
-        self.refresh_goals()
+        def _save():
+            upsert_production_goal_service(
+                line=line,
+                cell=cell,
+                machine=machine,
+                part_number=part_number,
+                target=target,
+                actor_user={"username": self.controller.user, "role": self.controller.role},
+            )
+            self.refresh_goals()
+
+        self._run_service_action(_save)

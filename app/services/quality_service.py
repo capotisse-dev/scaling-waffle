@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import Actor, ensure_actor, require_permission
-from ..audit import log_audit
+from .common import Actor, audit, require_permission
 from ..db import fetch_tool_entries, upsert_tool_entry
 
 
@@ -26,10 +25,23 @@ def update_quality_entry(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "update_quality_entry", "Quality")
-    upsert_tool_entry(entry)
-    log_audit(actor.username, f"Updated quality entry {entry.get('ID')}")
+    actor = require_permission(actor_user, PERMISSION_KEY, "update_quality_entry", "Quality")
+    try:
+        upsert_tool_entry(entry)
+        audit(
+            "quality.update",
+            actor.username,
+            {"entry_id": entry.get("ID")},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "quality.update",
+            actor.username,
+            {"entry_id": entry.get("ID"), "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def create_quality_entry(
@@ -37,7 +49,20 @@ def create_quality_entry(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "create_quality_entry", "Quality")
-    upsert_tool_entry(entry)
-    log_audit(actor.username, f"Created quality entry {entry.get('ID')}")
+    actor = require_permission(actor_user, PERMISSION_KEY, "create_quality_entry", "Quality")
+    try:
+        upsert_tool_entry(entry)
+        audit(
+            "quality.create",
+            actor.username,
+            {"entry_id": entry.get("ID")},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "quality.create",
+            actor.username,
+            {"entry_id": entry.get("ID"), "error": str(exc)},
+            success=False,
+        )
+        raise
