@@ -7,7 +7,7 @@ from datetime import datetime
 
 from .ui_common import HeaderFrame
 from .storage import safe_int, safe_float
-from .services.tool_life_service import (
+from .services.tool_entry_service import (
     create_shift_report,
     list_cells,
     list_downtime_codes_service,

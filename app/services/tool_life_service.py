@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import Actor, ensure_actor, require_permission
+from .common import Actor, audit, require_permission
 from .validation import validate_tool_change_entry
-from ..audit import log_audit
 from ..db import (
     apply_tool_change,
     fetch_tool_entries,
@@ -76,19 +75,32 @@ def create_tool_change_entry(
     new_stock_qty: Optional[int],
     actor_user: Actor | Dict[str, str] | None,
 ) -> float:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "create_tool_change_entry", "Tool Changer")
+    actor = require_permission(actor_user, PERMISSION_KEY, "create_tool_change_entry", "Tool Changer")
     validate_tool_change_entry(entry)
 
-    inserts = list_tool_inserts(tool_num)
-    cost = _calculate_insert_cost(inserts)
-    info = get_tool(tool_num)
-    if info and not inserts:
-        cost = float(info.get("unit_cost", 0.0) or 0.0)
+    try:
+        inserts = list_tool_inserts(tool_num)
+        cost = _calculate_insert_cost(inserts)
+        info = get_tool(tool_num)
+        if info and not inserts:
+            cost = float(info.get("unit_cost", 0.0) or 0.0)
 
-    apply_tool_change(entry, tool_num=tool_num, new_stock_qty=new_stock_qty, updated_by=actor.username)
-    log_audit(actor.username, f"Tool change entry {entry.get('ID')} saved")
-    return cost
+        apply_tool_change(entry, tool_num=tool_num, new_stock_qty=new_stock_qty, updated_by=actor.username)
+        audit(
+            "tool_entry.create",
+            actor.username,
+            {"entry_id": entry.get("ID"), "tool_num": tool_num},
+            success=True,
+        )
+        return cost
+    except Exception as exc:
+        audit(
+            "tool_entry.create",
+            actor.username,
+            {"entry_id": entry.get("ID"), "tool_num": tool_num, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def create_shift_report(
@@ -97,11 +109,24 @@ def create_shift_report(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "create_shift_report", "Operator")
+    actor = require_permission(actor_user, PERMISSION_KEY, "create_shift_report", "Operator")
     validate_tool_change_entry(entry)
-    upsert_tool_entry_with_downtime(entry, downtime_entries)
-    log_audit(actor.username, f"Shift production entry {entry.get('ID')} saved")
+    try:
+        upsert_tool_entry_with_downtime(entry, downtime_entries)
+        audit(
+            "shift_report.create",
+            actor.username,
+            {"entry_id": entry.get("ID")},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "shift_report.create",
+            actor.username,
+            {"entry_id": entry.get("ID"), "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def update_tool_change_entry(
@@ -109,10 +134,23 @@ def update_tool_change_entry(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "update_tool_change_entry", "Tool Changer")
-    upsert_tool_entry_with_downtime(entry, [])
-    log_audit(actor.username, f"Updated tool change entry {entry.get('ID')}")
+    actor = require_permission(actor_user, PERMISSION_KEY, "update_tool_change_entry", "Tool Changer")
+    try:
+        upsert_tool_entry_with_downtime(entry, [])
+        audit(
+            "tool_entry.update",
+            actor.username,
+            {"entry_id": entry.get("ID")},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "tool_entry.update",
+            actor.username,
+            {"entry_id": entry.get("ID"), "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def list_tool_change_entries() -> List[Dict[str, Any]]:

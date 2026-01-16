@@ -309,6 +309,8 @@ def init_db() -> None:
         FOREIGN KEY(part_id) REFERENCES parts(id) ON DELETE CASCADE
     );
 
+    -- Deprecated: machine_documents/machine_document_revisions will be removed after data migration.
+    -- TODO: Remove deprecated machine document tables after data is migrated to program_files/print_files.
     CREATE TABLE IF NOT EXISTS machine_documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         line_code TEXT NOT NULL,
@@ -346,6 +348,7 @@ def init_db() -> None:
     with connect() as conn:
         conn.executescript(schema)
         _migrate_production_goals(conn)
+        _migrate_machine_documents(conn)
     
         # track schema version (optional but fine)
         conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version','1')")
@@ -400,6 +403,26 @@ def init_db() -> None:
             "deleted_by": "TEXT NOT NULL DEFAULT ''",
             "delete_reason": "TEXT NOT NULL DEFAULT ''",
         })
+        _ensure_columns(conn, "program_files", {
+            "scope_type": "TEXT NOT NULL DEFAULT 'MACHINE'",
+            "machine_id": "INTEGER",
+            "file_path": "TEXT NOT NULL DEFAULT ''",
+            "file_hash": "TEXT NOT NULL DEFAULT ''",
+            "revision": "INTEGER NOT NULL DEFAULT 1",
+            "parent_id": "INTEGER",
+            "created_by": "TEXT NOT NULL DEFAULT ''",
+            "is_active": "INTEGER NOT NULL DEFAULT 1",
+        })
+        _ensure_columns(conn, "print_files", {
+            "scope_type": "TEXT NOT NULL DEFAULT 'MACHINE'",
+            "machine_id": "INTEGER",
+            "file_path": "TEXT NOT NULL DEFAULT ''",
+            "file_hash": "TEXT NOT NULL DEFAULT ''",
+            "revision": "INTEGER NOT NULL DEFAULT 1",
+            "parent_id": "INTEGER",
+            "created_by": "TEXT NOT NULL DEFAULT ''",
+            "is_active": "INTEGER NOT NULL DEFAULT 1",
+        })
 
 
 
@@ -440,6 +463,110 @@ def _migrate_production_goals(conn: sqlite3.Connection) -> None:
         "tool_life": "REAL NOT NULL DEFAULT 0.0",
         "production_qty": "REAL NOT NULL DEFAULT 0.0",
     })
+
+
+def _migrate_machine_documents(conn: sqlite3.Connection) -> None:
+    migrated = conn.execute(
+        "SELECT value FROM meta WHERE key='machine_docs_migrated'"
+    ).fetchone()
+    if migrated and migrated["value"] == "1":
+        return
+
+    doc_count = conn.execute("SELECT COUNT(1) AS cnt FROM machine_documents").fetchone()
+    if not doc_count or not doc_count["cnt"]:
+        conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('machine_docs_migrated','1')")
+        return
+
+    docs = conn.execute(
+        """
+        SELECT
+            d.id,
+            d.line_code,
+            d.machine_code,
+            d.doc_type,
+            d.doc_name,
+            d.created_by,
+            m.id AS machine_id
+        FROM machine_documents d
+        LEFT JOIN lines l ON l.name = d.line_code
+        LEFT JOIN cells c ON c.line_id = l.id
+        LEFT JOIN machines m ON m.cell_id = c.id AND m.name = d.machine_code
+        WHERE d.is_active=1
+        """
+    ).fetchall()
+
+    for doc in docs:
+        doc_type = (doc["doc_type"] or "").strip().lower()
+        if doc_type in ("print", "prints", "drawing", "drawings"):
+            target_table = "print_files"
+        elif doc_type in ("program", "programs"):
+            target_table = "program_files"
+        else:
+            continue
+
+        machine_id = doc["machine_id"]
+        filename = doc["doc_name"] or ""
+        exists = conn.execute(
+            f"""
+            SELECT 1
+            FROM {target_table}
+            WHERE scope_type='MACHINE'
+              AND filename=?
+              AND COALESCE(machine_id, 0)=COALESCE(?, 0)
+            LIMIT 1
+            """,
+            (filename, machine_id),
+        ).fetchone()
+        if exists:
+            continue
+
+        revisions = conn.execute(
+            """
+            SELECT revision_number, stored_path, original_filename, file_hash, created_at, created_by
+            FROM machine_document_revisions
+            WHERE document_id=?
+            ORDER BY revision_number ASC
+            """,
+            (doc["id"],),
+        ).fetchall()
+        if not revisions:
+            continue
+
+        max_revision = max([r["revision_number"] for r in revisions])
+        parent_id = None
+        for rev in revisions:
+            row = conn.execute(
+                f"""
+                INSERT INTO {target_table}(
+                    scope_type,
+                    machine_id,
+                    filename,
+                    file_path,
+                    file_hash,
+                    revision,
+                    parent_id,
+                    created_at,
+                    created_by,
+                    is_active
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "MACHINE",
+                    machine_id,
+                    filename,
+                    rev["stored_path"],
+                    rev["file_hash"],
+                    rev["revision_number"],
+                    parent_id,
+                    rev["created_at"],
+                    rev["created_by"] or doc["created_by"] or "",
+                    1 if rev["revision_number"] == max_revision else 0,
+                ),
+            )
+            parent_id = int(row.lastrowid)
+
+    conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('machine_docs_migrated','1')")
 
 
 

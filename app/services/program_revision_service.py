@@ -4,9 +4,8 @@ import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from . import Actor, ensure_actor, require_permission
+from .common import Actor, audit, require_permission
 from .validation import validate_program_revision
-from ..audit import log_audit
 from ..config import DATA_DIR
 from ..db import (
     add_program_file,
@@ -48,33 +47,52 @@ def create_program_file(
     machine_id: Optional[int],
     actor_user: Actor | Dict[str, str] | None,
 ) -> Tuple[str, Optional[int]]:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "add_program_file", "Machine History")
+    actor = require_permission(actor_user, PERMISSION_KEY, "add_program_file", "Machine History")
     validate_program_revision({"filename": filename, "scope_type": scope_type})
 
-    file_hash = _hash_file(source_path)
-    revisions = list_program_revisions(scope_type, filename, machine_id)
-    for rev in revisions:
-        if rev.get("file_hash") == file_hash:
-            return "DUPLICATE", None
+    try:
+        file_hash = _hash_file(source_path)
+        revisions = list_program_revisions(scope_type, filename, machine_id)
+        for rev in revisions:
+            if rev.get("file_hash") == file_hash:
+                audit(
+                    "program_file.create",
+                    actor.username,
+                    {"filename": filename, "scope": scope_type, "status": "DUPLICATE"},
+                    success=True,
+                )
+                return "DUPLICATE", None
 
-    next_revision = (revisions[0]["revision"] + 1) if revisions else 1
-    deactivate_program_revisions(scope_type, filename, machine_id)
-    stored_path = _store_file(source_path, scope_type, filename, next_revision)
-    parent_id = revisions[0]["id"] if revisions else None
-    new_id = add_program_file(
-        scope_type=scope_type,
-        machine_id=machine_id,
-        filename=filename,
-        file_path=stored_path,
-        file_hash=file_hash,
-        revision=next_revision,
-        parent_id=parent_id,
-        created_by=actor.username,
-        is_active=1,
-    )
-    log_audit(actor.username, f"Added program file {filename} rev {next_revision}")
-    return "CREATED", new_id
+        next_revision = (revisions[0]["revision"] + 1) if revisions else 1
+        deactivate_program_revisions(scope_type, filename, machine_id)
+        stored_path = _store_file(source_path, scope_type, filename, next_revision)
+        parent_id = revisions[0]["id"] if revisions else None
+        new_id = add_program_file(
+            scope_type=scope_type,
+            machine_id=machine_id,
+            filename=filename,
+            file_path=stored_path,
+            file_hash=file_hash,
+            revision=next_revision,
+            parent_id=parent_id,
+            created_by=actor.username,
+            is_active=1,
+        )
+        audit(
+            "program_file.create",
+            actor.username,
+            {"filename": filename, "scope": scope_type, "revision": next_revision},
+            success=True,
+        )
+        return "CREATED", new_id
+    except Exception as exc:
+        audit(
+            "program_file.create",
+            actor.username,
+            {"filename": filename, "scope": scope_type, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def list_program_revisions_service(
@@ -101,13 +119,26 @@ def rollback_program_revision(
     target_revision_id: int,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "rollback_program_revision", "Machine History")
-    deactivate_program_revisions(scope_type, filename, machine_id)
-    from ..db import activate_program_revision
+    actor = require_permission(actor_user, PERMISSION_KEY, "rollback_program_revision", "Machine History")
+    try:
+        deactivate_program_revisions(scope_type, filename, machine_id)
+        from ..db import activate_program_revision
 
-    activate_program_revision(target_revision_id)
-    log_audit(actor.username, f"Rolled back program {filename} to revision {target_revision_id}")
+        activate_program_revision(target_revision_id)
+        audit(
+            "program_file.rollback",
+            actor.username,
+            {"filename": filename, "target_revision_id": target_revision_id},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "program_file.rollback",
+            actor.username,
+            {"filename": filename, "target_revision_id": target_revision_id, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def update_program_file(*args, **kwargs) -> None:

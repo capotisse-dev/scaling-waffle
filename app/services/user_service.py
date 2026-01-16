@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import Actor, ensure_actor, require_permission
-from ..audit import log_audit
+from .common import Actor, audit, require_permission
 from ..db import (
     delete_screen_permission,
     get_user,
@@ -27,19 +26,32 @@ def create_user(
     line: str,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "create_user", "Admin")
-    upsert_user(
-        username=username,
-        password=password,
-        role=role,
-        name=name,
-        line=line,
-        is_active=1,
-        created_by=actor.username,
-        updated_by=actor.username,
-    )
-    log_audit(actor.username, f"Created user {username} ({role})")
+    actor = require_permission(actor_user, PERMISSION_KEY, "create_user", "Admin")
+    try:
+        upsert_user(
+            username=username,
+            password=password,
+            role=role,
+            name=name,
+            line=line,
+            is_active=1,
+            created_by=actor.username,
+            updated_by=actor.username,
+        )
+        audit(
+            "user.create",
+            actor.username,
+            {"username": username, "role": role},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "user.create",
+            actor.username,
+            {"username": username, "role": role, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def update_user(
@@ -48,12 +60,25 @@ def update_user(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "update_user", "Admin")
+    actor = require_permission(actor_user, PERMISSION_KEY, "update_user", "Admin")
     fields = dict(fields)
     fields["updated_by"] = actor.username
-    update_user_fields(username, fields)
-    log_audit(actor.username, f"Updated user {username}")
+    try:
+        update_user_fields(username, fields)
+        audit(
+            "user.update",
+            actor.username,
+            {"username": username},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "user.update",
+            actor.username,
+            {"username": username, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def list_user_accounts() -> List[Dict[str, Any]]:
@@ -75,10 +100,23 @@ def set_permission(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "set_permission", "Admin")
-    set_screen_permission(username, screen, level)
-    log_audit(actor.username, f"Set access {screen}={level} for {username}")
+    actor = require_permission(actor_user, PERMISSION_KEY, "set_permission", "Admin")
+    try:
+        set_screen_permission(username, screen, level)
+        audit(
+            "permission.set",
+            actor.username,
+            {"username": username, "screen": screen, "level": level},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "permission.set",
+            actor.username,
+            {"username": username, "screen": screen, "level": level, "error": str(exc)},
+            success=False,
+        )
+        raise
 
 
 def delete_permission(
@@ -87,7 +125,20 @@ def delete_permission(
     *,
     actor_user: Actor | Dict[str, str] | None,
 ) -> None:
-    actor = ensure_actor(actor_user)
-    require_permission(actor, PERMISSION_KEY, "delete_permission", "Admin")
-    delete_screen_permission(username, screen)
-    log_audit(actor.username, f"Removed access {screen} for {username}")
+    actor = require_permission(actor_user, PERMISSION_KEY, "delete_permission", "Admin")
+    try:
+        delete_screen_permission(username, screen)
+        audit(
+            "permission.delete",
+            actor.username,
+            {"username": username, "screen": screen},
+            success=True,
+        )
+    except Exception as exc:
+        audit(
+            "permission.delete",
+            actor.username,
+            {"username": username, "screen": screen, "error": str(exc)},
+            success=False,
+        )
+        raise
